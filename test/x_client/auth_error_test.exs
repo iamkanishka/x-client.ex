@@ -1,4 +1,4 @@
-defmodule XClient.AuthTest do
+defmodule XClient.AuthErrorTest do
   use ExUnit.Case, async: true
 
   alias XClient.{Auth, Client}
