@@ -1,680 +1,532 @@
-# XClient API Reference
+# API Reference
 
-Complete API reference for all endpoints and rate limits.
+Complete reference for all public functions in `XClient` v1.1.0.
 
-## Table of Contents
-
-- [Tweets](#tweets)
-- [Media](#media)
-- [Users](#users)
-- [Friendships](#friendships)
-- [Favorites](#favorites)
-- [Direct Messages](#direct-messages)
-- [Search](#search)
-- [Lists](#lists)
-- [Account](#account)
-- [Trends](#trends)
-- [Geo](#geo)
-- [Help](#help)
-- [Application](#application)
+> **Type conventions used throughout this document**
+>
+> - `client` — an optional `%XClient.Client{}` struct. When omitted, application config credentials are used.
+> - `opts` — a keyword list of optional parameters. All boolean values are coerced to `"true"` / `"false"` strings automatically.
+> - `response()` — `{:ok, term()} | {:error, %XClient.Error{}}`
 
 ---
 
-## Tweets
+## `XClient`
 
-### POST statuses/update
-**Function:** `XClient.Tweets.update/3`  
-**Rate Limit:** 300 per 3 hours (combined with retweet)
+The top-level module. Use `XClient.client/1` to build per-request credential structs.
 
-Post a new tweet.
+### `client(opts \\ []) :: %XClient.Client{}`
 
-**Parameters:**
-- `status` (required) - Tweet text
-- `in_reply_to_status_id` - ID of tweet to reply to
-- `auto_populate_reply_metadata` - Auto-add @mentions
-- `media_ids` - List of media IDs (max 4)
-- `lat` / `long` - Geolocation coordinates
-- `place_id` - Place ID
-- And more...
+Builds an `%XClient.Client{}` struct. Missing keys fall back to application config.
 
-### POST statuses/destroy/:id
-**Function:** `XClient.Tweets.destroy/3`  
-**Rate Limit:** No specific limit
+```elixir
+client = XClient.client(
+  consumer_key: "CK",
+  consumer_secret: "CS",
+  access_token: "AT",
+  access_token_secret: "ATS"
+)
+```
 
-Delete a tweet.
+### `verify_credentials(opts \\ []) :: response()`
 
-### POST statuses/retweet/:id
-**Function:** `XClient.Tweets.retweet/3`  
-**Rate Limit:** 300 per 3 hours (combined with update)
+Convenience wrapper for `Account.verify_credentials/2`.
 
-Retweet a tweet.
-
-### POST statuses/unretweet/:id
-**Function:** `XClient.Tweets.unretweet/3`  
-**Rate Limit:** No specific limit
-
-Remove a retweet.
-
-### GET statuses/show/:id
-**Function:** `XClient.Tweets.show/3`  
-**Rate Limit:** 900 per 15 min (user), 900 per 15 min (app)
-
-Get a single tweet by ID.
-
-### POST statuses/lookup
-**Function:** `XClient.Tweets.lookup/3`  
-**Rate Limit:** 900 per 15 min (user), 300 per 15 min (app)
-
-Get up to 100 tweets by IDs.
-
-### GET statuses/user_timeline
-**Function:** `XClient.Tweets.user_timeline/2`  
-**Rate Limit:** 900 per 15 min (user), 1500 per 15 min (app)
-
-Get a user's timeline.
-
-**Parameters:**
-- `user_id` or `screen_name` (required)
-- `count` - Number of tweets (max 200)
-- `since_id` - Return tweets after this ID
-- `max_id` - Return tweets before this ID
-- `exclude_replies` - Exclude replies
-- `include_rts` - Include retweets
-
-### GET statuses/mentions_timeline
-**Function:** `XClient.Tweets.mentions_timeline/2`  
-**Rate Limit:** 75 per 15 min (user only)
-
-Get mentions of the authenticated user.
-
-### GET statuses/retweets_of_me
-**Function:** `XClient.Tweets.retweets_of_me/2`  
-**Rate Limit:** 75 per 15 min (user only)
-
-Get tweets that have been retweeted.
-
-### GET statuses/retweets/:id
-**Function:** `XClient.Tweets.retweets/3`  
-**Rate Limit:** 75 per 15 min (user), 300 per 15 min (app)
-
-Get up to 100 retweets of a tweet.
-
-### GET statuses/retweeters/ids
-**Function:** `XClient.Tweets.retweeters_ids/3`  
-**Rate Limit:** 75 per 15 min (user), 300 per 15 min (app)
-
-Get user IDs who retweeted a tweet.
+```elixir
+{:ok, user} = XClient.verify_credentials()
+{:ok, user} = XClient.verify_credentials(skip_status: true)
+```
 
 ---
 
-## Media
+## `XClient.Tweets`
 
-### POST media/upload
-**Function:** `XClient.Media.upload/3`  
-**Rate Limit:** No specific limit
+Endpoint prefix: `statuses/`
 
-Upload media (images, videos, GIFs).
+### `update(status, opts \\ [], client \\ nil) :: response()`
+### `update(client, status, opts \\ []) :: response()`
 
-**Parameters:**
-- `media` - File path or binary data (required)
-- `media_type` - MIME type
-- `media_category` - Category (tweet_image, tweet_video, etc.)
-- `additional_owners` - User IDs who can use media
-- `alt_text` - Accessibility text
+Posts a new tweet. Multi-account form accepts `client` as first argument.
 
-**Size Limits:**
-- Images: 5 MB
-- GIFs: 15 MB
-- Videos: 512 MB
+| Option | Type | Description |
+|--------|------|-------------|
+| `:in_reply_to_status_id` | string | ID of the tweet being replied to |
+| `:media_ids` | `[string]` | Up to 4 media ID strings |
+| `:possibly_sensitive` | boolean | Mark media as sensitive |
+| `:lat` / `:long` | float | Geo-tag coordinates |
+| `:place_id` | string | X Place ID |
+| `:trim_user` | boolean | Return only user ID |
+| `:tweet_mode` | `"extended"` | Return full text (> 140 chars) |
 
-### POST media/upload (chunked)
-**Function:** `XClient.Media.chunked_upload/3`  
-**Rate Limit:** No specific limit
+### `destroy(id, opts \\ [], client \\ nil) :: response()`
 
-Upload large media files in chunks.
+Deletes a tweet owned by the authenticated user. Returns the deleted tweet.
 
-### GET media/upload (STATUS)
-**Function:** `XClient.Media.upload_status/2`  
-**Rate Limit:** No specific limit
+### `retweet(id, opts \\ [], client \\ nil) :: response()`
 
-Check processing status of uploaded media.
+Retweets a tweet.
 
-### POST media/metadata/create
-**Function:** `XClient.Media.add_metadata/3`  
-**Rate Limit:** No specific limit
+### `unretweet(id, opts \\ [], client \\ nil) :: response()`
 
-Add alt text to uploaded media.
+Removes a retweet.
 
----
+### `show(id, opts \\ [], client \\ nil) :: response()`
 
-## Users
+Returns a single tweet by ID.
 
-### GET users/show
-**Function:** `XClient.Users.show/2`  
-**Rate Limit:** 900 per 15 min
+### `lookup(ids, opts \\ [], client \\ nil) :: response()`
 
-Get information about a user.
+Returns up to 100 tweets by a list of IDs. Uses a POST request.
 
-**Parameters:**
-- `user_id` or `screen_name` (required)
-- `include_entities` - Include entities
+### `user_timeline(opts \\ [], client \\ nil) :: response()`
 
-### POST users/lookup
-**Function:** `XClient.Users.lookup/2`  
-**Rate Limit:** 900 per 15 min (user), 300 per 15 min (app)
+Returns up to 200 recent tweets from a user's timeline. Requires `:user_id` or `:screen_name`.
 
-Get up to 100 users.
+| Option | Max | Description |
+|--------|-----|-------------|
+| `:count` | 200 | Number of tweets |
+| `:since_id` | — | Return tweets newer than ID |
+| `:max_id` | — | Return tweets at or older than ID |
+| `:exclude_replies` | — | Omit reply tweets |
+| `:include_rts` | — | Include native retweets |
 
-**Parameters:**
-- `user_id` or `screen_name` - List or comma-separated (required)
-- `include_entities` - Include entities
+### `mentions_timeline(opts \\ [], client \\ nil) :: response()`
 
-### GET users/search
-**Function:** `XClient.Users.search/3`  
-**Rate Limit:** 900 per 15 min (user only)
+Returns up to 200 recent @mentions for the authenticated user.
 
-Search for users.
+### `retweets_of_me(opts \\ [], client \\ nil) :: response()`
 
-**Parameters:**
-- `q` - Search query (required)
-- `page` - Page number
-- `count` - Users per page (max 20)
+Returns authenticated user's tweets that others have retweeted.
 
-### GET users/suggestions
-**Function:** `XClient.Users.suggestions/2`  
-**Rate Limit:** 15 per 15 min
+### `retweets(id, opts \\ [], client \\ nil) :: response()`
 
-Get suggested user categories.
+Returns up to 100 retweets of a given tweet.
 
-### GET users/suggestions/:slug
-**Function:** `XClient.Users.suggestions_slug/3`  
-**Rate Limit:** 15 per 15 min
+### `retweeters_ids(id, opts \\ [], client \\ nil) :: response()`
 
-Get users in a suggested category.
+Returns IDs of users who retweeted a tweet.
 
-### GET users/suggestions/:slug/members
-**Function:** `XClient.Users.suggestions_members/2`  
-**Rate Limit:** 15 per 15 min
-
-Get members of a suggested category.
+**Rate Limits** — `update` / `retweet`: 300 / 3 h | `user_timeline`: 900 / 15 min (user), 1500 / 15 min (app) | `mentions_timeline`: 75 / 15 min
 
 ---
 
-## Friendships
+## `XClient.Media`
 
-### POST friendships/create
-**Function:** `XClient.Friendships.create/2`  
-**Rate Limit:** 400 per 24 hours (user), 1000 per 24 hours (app)
+Endpoint prefix: `media/`  Upload base: `https://upload.x.com/1.1`
 
-Follow a user.
+### `upload(media, opts \\ [], client \\ nil) :: response()`
 
-**Parameters:**
-- `user_id` or `screen_name` (required)
-- `follow` - Enable notifications
+Uploads media to X. Accepts a file path or binary data. Automatically uses chunked upload for files > 5 MB.
 
-### POST friendships/destroy
-**Function:** `XClient.Friendships.destroy/2`  
-**Rate Limit:** No specific limit
+| Option | Description |
+|--------|-------------|
+| `:media_type` | MIME type string — required for raw binary input; auto-detected for file paths |
+| `:media_category` | `"tweet_image"`, `"tweet_gif"`, `"tweet_video"`, `"dm_image"`, `"dm_gif"`, `"dm_video"` |
+| `:additional_owners` | List of user IDs who may use this media |
+| `:alt_text` | Accessibility description (max 1000 chars) |
 
-Unfollow a user.
+```elixir
+{:ok, media} = XClient.Media.upload("priv/photo.jpg")
+{:ok, media} = XClient.Media.upload("priv/video.mp4", media_category: "tweet_video")
 
-### GET friendships/show
-**Function:** `XClient.Friendships.show/2`  
-**Rate Limit:** 180 per 15 min (user), 15 per 15 min (app)
+# Binary upload
+data = File.read!("priv/image.png")
+{:ok, media} = XClient.Media.upload(data, media_type: "image/png")
+```
 
-Get relationship between two users.
+### `chunked_upload(path, opts \\ [], client \\ nil) :: response()`
 
-**Parameters:**
-- Source user: `source_id` or `source_screen_name` (required)
-- Target user: `target_id` or `target_screen_name` (required)
+Explicitly uses the INIT / APPEND / FINALIZE chunked upload flow. Use for large files or when you need to control the chunk size.
 
-### GET followers/ids
-**Function:** `XClient.Friendships.followers_ids/2`  
-**Rate Limit:** 15 per 15 min
+### `upload_status(media_id, client \\ nil) :: response()`
 
-Get follower IDs.
+Polls processing status for video/GIF uploads. Returns `processing_info` with state: `"pending"`, `"in_progress"`, `"succeeded"`, or `"failed"`.
 
-**Parameters:**
-- `user_id` or `screen_name`
-- `cursor` - Pagination cursor
-- `count` - IDs per page (max 5000)
+### `add_metadata(media_id, alt_text, client \\ nil) :: response()`
 
-### GET followers/list
-**Function:** `XClient.Friendships.followers_list/2`  
-**Rate Limit:** 15 per 15 min
+Adds alt text to an already-uploaded media object.
 
-Get follower details.
-
-**Parameters:**
-- `user_id` or `screen_name`
-- `cursor` - Pagination cursor
-- `count` - Users per page (max 200)
-
-### GET friends/ids
-**Function:** `XClient.Friendships.friends_ids/2`  
-**Rate Limit:** 15 per 15 min
-
-Get IDs of users being followed.
-
-### GET friends/list
-**Function:** `XClient.Friendships.friends_list/2`  
-**Rate Limit:** 15 per 15 min
-
-Get details of users being followed.
+**Size Limits** — Images: 5 MB | GIFs: 15 MB | Videos: 512 MB
 
 ---
 
-## Favorites
+## `XClient.Users`
 
-### POST favorites/create
-**Function:** `XClient.Favorites.create/3`  
-**Rate Limit:** 1000 per 24 hours
+Endpoint prefix: `users/`
 
-Like a tweet.
+### `show(opts \\ [], client \\ nil) :: response()`
 
-**Parameters:**
-- `id` - Tweet ID (required)
-- `include_entities` - Include entities
+Returns a single user. Requires `:user_id` or `:screen_name`.
 
-### POST favorites/destroy
-**Function:** `XClient.Favorites.destroy/3`  
-**Rate Limit:** No specific limit
+### `lookup(opts \\ [], client \\ nil) :: response()`
 
-Unlike a tweet.
+Returns up to 100 users. Pass `:user_id` or `:screen_name` as a list or comma-separated string.
 
-### GET favorites/list
-**Function:** `XClient.Favorites.list/2`  
-**Rate Limit:** 75 per 15 min
+### `search(query, opts \\ [], client \\ nil) :: response()`
 
-Get liked tweets.
+Searches for users matching a query string.
 
-**Parameters:**
-- `user_id` or `screen_name`
-- `count` - Tweets per page (max 200)
-- `since_id` - Return tweets after this ID
-- `max_id` - Return tweets before this ID
+| Option | Max | Description |
+|--------|-----|-------------|
+| `:count` | 20 | Users per page |
+| `:page` | — | Page number (1-based) |
 
----
+### `suggestions(opts \\ [], client \\ nil) :: response()`
 
-## Direct Messages
+Returns suggested user categories.
 
-### POST direct_messages/events/new
-**Function:** `XClient.DirectMessages.send/4`  
-**Rate Limit:** 1000 per 24 hours (user), 15000 per 24 hours (app)
+### `suggestions_slug(slug, opts \\ [], client \\ nil) :: response()`
 
-Send a direct message.
+Returns suggested users for a specific category slug.
 
-**Parameters:**
-- `recipient_id` - Recipient user ID (required)
-- `text` - Message text (required)
-- `media_id` - Attached media ID
-- `quick_reply_options` - List of quick reply options
+### `suggestions_members(slug, client \\ nil) :: response()`
 
-### DELETE direct_messages/events/destroy
-**Function:** `XClient.DirectMessages.destroy/2`  
-**Rate Limit:** No specific limit
+Returns members of a suggested user category.
 
-Delete a direct message.
-
-### GET direct_messages/events/list
-**Function:** `XClient.DirectMessages.list/2`  
-**Rate Limit:** No specific limit
-
-Get direct messages.
-
-**Parameters:**
-- `count` - Events to return (max 50)
-- `cursor` - Pagination cursor
-
-### GET direct_messages/events/show
-**Function:** `XClient.DirectMessages.show/2`  
-**Rate Limit:** No specific limit
-
-Get a single direct message.
+**Rate Limits** — `show` / `lookup`: 900 / 15 min | `search`: 900 / 15 min (user only) | `suggestions*`: 15 / 15 min
 
 ---
 
-## Search
+## `XClient.Friendships`
 
-### GET search/tweets
-**Function:** `XClient.Search.tweets/3`  
-**Rate Limit:** 180 per 15 min (user), 450 per 15 min (app)
+Endpoint prefixes: `friendships/`, `followers/`, `friends/`
 
-Search for tweets.
+### `create(opts \\ [], client \\ nil) :: response()`
 
-**Parameters:**
-- `q` - Search query (required)
-- `geocode` - Location filter (lat,long,radius)
-- `lang` - Language code
-- `result_type` - mixed, recent, or popular
-- `count` - Results per page (max 100)
-- `until` - Date limit (YYYY-MM-DD)
-- `since_id` - Return tweets after this ID
-- `max_id` - Return tweets before this ID
+Follows a user. Requires `:user_id` or `:screen_name`.
 
-**Search Operators:**
-- `word1 word2` - Both words
-- `"exact phrase"` - Exact phrase
-- `word1 OR word2` - Either word
-- `word1 -word2` - word1 but not word2
-- `#hashtag` - Hashtag
-- `from:user` - From user
-- `to:user` - To user
-- `@user` - Mentions user
-- `:)` or `:(` - Positive or negative
-- `?` - Questions
-- `filter:links` - Contains links
+### `destroy(opts \\ [], client \\ nil) :: response()`
 
----
+Unfollows a user. Requires `:user_id` or `:screen_name`.
 
-## Lists
+### `show(opts \\ [], client \\ nil) :: response()`
 
-### GET lists/list
-**Function:** `XClient.Lists.list/2`  
-**Rate Limit:** 15 per 15 min
+Returns the relationship between two users. Requires source and target identifiers.
 
-Get all lists for a user.
+### `followers_ids(opts \\ [], client \\ nil) :: response()`
 
-### GET lists/statuses
-**Function:** `XClient.Lists.statuses/2`  
-**Rate Limit:** 900 per 15 min
+Returns cursor-paginated follower IDs. Up to 5000 per page.
 
-Get tweets from a list.
+### `followers_list(opts \\ [], client \\ nil) :: response()`
 
-**Parameters:**
-- `list_id` or (`slug` and `owner_screen_name/owner_id`) (required)
-- `since_id` - Return tweets after this ID
-- `max_id` - Return tweets before this ID
-- `count` - Tweets per page (max 200)
+Returns cursor-paginated follower user objects. Up to 200 per page.
 
-### GET lists/show
-**Function:** `XClient.Lists.show/2`  
-**Rate Limit:** 75 per 15 min
+### `friends_ids(opts \\ [], client \\ nil) :: response()`
 
-Get list information.
+Returns cursor-paginated following IDs. Up to 5000 per page.
 
-### GET lists/members
-**Function:** `XClient.Lists.members/2`  
-**Rate Limit:** 900 per 15 min (user), 75 per 15 min (app)
+### `friends_list(opts \\ [], client \\ nil) :: response()`
 
-Get list members.
+Returns cursor-paginated following user objects. Up to 200 per page.
 
-**Parameters:**
-- `list_id` or (`slug` and `owner_screen_name/owner_id`) (required)
-- `count` - Members per page (max 5000)
-- `cursor` - Pagination cursor
-
-### GET lists/members/show
-**Function:** `XClient.Lists.members_show/2`  
-**Rate Limit:** 15 per 15 min
-
-Check if user is a list member.
-
-### GET lists/memberships
-**Function:** `XClient.Lists.memberships/2`  
-**Rate Limit:** 75 per 15 min
-
-Get lists a user is a member of.
-
-### GET lists/ownerships
-**Function:** `XClient.Lists.ownerships/2`  
-**Rate Limit:** 15 per 15 min
-
-Get lists owned by a user.
-
-### GET lists/subscribers
-**Function:** `XClient.Lists.subscribers/2`  
-**Rate Limit:** 180 per 15 min (user), 15 per 15 min (app)
-
-Get list subscribers.
-
-### GET lists/subscribers/show
-**Function:** `XClient.Lists.subscribers_show/2`  
-**Rate Limit:** 15 per 15 min
-
-Check if user is subscribed to a list.
-
-### GET lists/subscriptions
-**Function:** `XClient.Lists.subscriptions/2`  
-**Rate Limit:** 15 per 15 min
-
-Get lists a user is subscribed to.
+**Rate Limits** — `create`: 400 / 24 h (user), 1000 / 24 h (app) | `show`: 180 / 15 min | `followers_*` / `friends_*`: 15 / 15 min
 
 ---
 
-## Account
+## `XClient.Favorites`
 
-### GET account/verify_credentials
-**Function:** `XClient.Account.verify_credentials/2`  
-**Rate Limit:** 75 per 15 min (user only)
+Endpoint prefix: `favorites/`
 
-Verify credentials and get user info.
+### `create(id, opts \\ [], client \\ nil) :: response()`
 
-**Parameters:**
-- `include_entities` - Include entities
-- `skip_status` - Exclude status
-- `include_email` - Include email
+Likes a tweet.
 
-### POST account/update_profile
-**Function:** `XClient.Account.update_profile/2`  
-**Rate Limit:** No specific limit
+### `destroy(id, opts \\ [], client \\ nil) :: response()`
 
-Update profile information.
+Unlikes a tweet.
 
-**Parameters:**
-- `name` - Display name (max 50 chars)
-- `url` - Website (max 100 chars)
-- `location` - Location (max 30 chars)
-- `description` - Bio (max 160 chars)
+### `list(opts \\ [], client \\ nil) :: response()`
 
-### POST account/update_profile_image
-**Function:** `XClient.Account.update_profile_image/3`  
-**Rate Limit:** No specific limit
+Returns up to 200 tweets liked by the specified user. Requires `:user_id` or `:screen_name`.
 
-Update profile image.
-
-**Requirements:**
-- Less than 700KB
-- GIF, JPG, or PNG
-- Square recommended
-
-### POST account/update_profile_banner
-**Function:** `XClient.Account.update_profile_banner/3`  
-**Rate Limit:** No specific limit
-
-Update profile banner.
-
-**Requirements:**
-- Less than 5MB
-- JPG, PNG, or GIF
-- 1500x500 recommended
-
-### POST account/remove_profile_banner
-**Function:** `XClient.Account.remove_profile_banner/1`  
-**Rate Limit:** No specific limit
-
-Remove profile banner.
-
-### GET account/settings
-**Function:** `XClient.Account.settings/1`  
-**Rate Limit:** No specific limit
-
-Get account settings.
-
-### POST account/settings
-**Function:** `XClient.Account.update_settings/2`  
-**Rate Limit:** No specific limit
-
-Update account settings.
+**Rate Limits** — `create`: 1000 / 24 h | `list`: 75 / 15 min
 
 ---
 
-## Trends
+## `XClient.DirectMessages`
 
-### GET trends/place
-**Function:** `XClient.Trends.place/3`  
-**Rate Limit:** 75 per 15 min
+Endpoint prefix: `direct_messages/events/`
 
-Get trending topics for a location.
+Uses the event-based DM API (not the deprecated `direct_messages/new`).
 
-**Parameters:**
-- `id` - WOEID (required)
-- `exclude` - Exclude hashtags
+### `send(recipient_id, text, opts \\ [], client \\ nil) :: response()`
 
-**Common WOEIDs:**
-- Worldwide: 1
-- United States: 23424977
-- United Kingdom: 23424975
+Sends a Direct Message.
 
-### GET trends/available
-**Function:** `XClient.Trends.available/1`  
-**Rate Limit:** 75 per 15 min
+| Option | Description |
+|--------|-------------|
+| `:media_id` | Media ID string to attach |
+| `:quick_reply_options` | List of label strings for quick-reply buttons |
 
-Get all available trend locations.
+```elixir
+{:ok, event} = XClient.DirectMessages.send("987654321", "Hello!")
 
-### GET trends/closest
-**Function:** `XClient.Trends.closest/2`  
-**Rate Limit:** 75 per 15 min
+{:ok, event} = XClient.DirectMessages.send("987654321", "Pick one:",
+  quick_reply_options: ["Yes", "No", "Maybe"])
+```
 
-Get closest trend locations.
+### `destroy(id, client \\ nil) :: response()`
 
-**Parameters:**
-- `lat` - Latitude (required)
-- `long` - Longitude (required)
+Deletes a DM event (sender only, within time window).
 
----
+### `list(opts \\ [], client \\ nil) :: response()`
 
-## Geo
+Returns up to 50 DM events. Supports `:count` and `:cursor` for pagination.
 
-### GET geo/id/:place_id
-**Function:** `XClient.Geo.id/2`  
-**Rate Limit:** 75 per 15 min (user only)
+### `show(id, client \\ nil) :: response()`
 
-Get place information.
+Returns a single DM event by ID.
+
+**Rate Limits** — `send`: 1000 / 24 h (user), 15000 / 24 h (app) | `list` / `show`: 15 / 15 min
 
 ---
 
-## Help
+## `XClient.Lists`
 
-### GET help/configuration
-**Function:** `XClient.Help.configuration/1`  
-**Rate Limit:** 15 per 15 min
+Endpoint prefix: `lists/`
 
-Get X configuration.
+All list identification options: `:list_id` **or** `:slug` + `:owner_screen_name` / `:owner_id`.
 
-### GET help/languages
-**Function:** `XClient.Help.languages/1`  
-**Rate Limit:** 15 per 15 min
+### `list(opts \\ [], client \\ nil) :: response()`
+### `statuses(opts \\ [], client \\ nil) :: response()`
+### `show(opts \\ [], client \\ nil) :: response()`
+### `members(opts \\ [], client \\ nil) :: response()`
+### `members_show(opts \\ [], client \\ nil) :: response()`
+### `memberships(opts \\ [], client \\ nil) :: response()`
+### `ownerships(opts \\ [], client \\ nil) :: response()`
+### `subscribers(opts \\ [], client \\ nil) :: response()`
+### `subscribers_show(opts \\ [], client \\ nil) :: response()`
+### `subscriptions(opts \\ [], client \\ nil) :: response()`
 
-Get supported languages.
-
-### GET help/privacy
-**Function:** `XClient.Help.privacy/1`  
-**Rate Limit:** 15 per 15 min
-
-Get privacy policy.
-
-### GET help/tos
-**Function:** `XClient.Help.tos/1`  
-**Rate Limit:** 15 per 15 min
-
-Get terms of service.
+**Rate Limits** — `statuses` / `members`: 900 / 15 min | `show`: 75 / 15 min | `memberships`: 75 / 15 min | others: 15 / 15 min
 
 ---
 
-## Application
+## `XClient.Search`
 
-### GET application/rate_limit_status
-**Function:** `XClient.Application.rate_limit_status/2`  
-**Rate Limit:** 180 per 15 min
+Endpoint: `search/tweets`
 
-Get current rate limit status.
+### `tweets(query, opts \\ [], client \\ nil) :: response()`
 
-**Parameters:**
-- `resources` - Comma-separated resource families
+Searches for recent tweets. Returns `%{"statuses" => [...], "search_metadata" => {...}}`.
 
-**Resource Families:**
-- statuses
-- users
-- search
-- friends
-- followers
-- lists
-- direct_messages
-- favorites
-- trends
-- geo
-- account
-- application
-- help
+| Option | Description |
+|--------|-------------|
+| `:count` | Max 100 (default 15) |
+| `:result_type` | `"mixed"` (default), `"recent"`, `"popular"` |
+| `:geocode` | `"lat,long,radius"` e.g. `"37.78,-122.39,5mi"` |
+| `:lang` | ISO 639-1 language code |
+| `:since_id` / `:max_id` | Pagination anchors |
+| `:until` | `"YYYY-MM-DD"` upper date bound |
+| `:tweet_mode` | `"extended"` for full text |
+
+**Rate Limits** — 180 / 15 min (user), 450 / 15 min (app)
 
 ---
 
-## Rate Limit Summary
+## `XClient.Account`
 
-### 15-Minute Windows
+Endpoint prefix: `account/`
 
-| Endpoint | User | App |
-|----------|------|-----|
-| GET statuses/show | 900 | 900 |
-| GET statuses/user_timeline | 900 | 1500 |
-| GET statuses/mentions_timeline | 75 | - |
-| GET statuses/lookup | 900 | 300 |
-| GET search/tweets | 180 | 450 |
-| GET users/show | 900 | 900 |
-| GET users/lookup | 900 | 300 |
-| GET friendships/show | 180 | 15 |
-| GET followers/ids | 15 | 15 |
-| GET friends/ids | 15 | 15 |
-| GET favorites/list | 75 | 75 |
-| GET lists/statuses | 900 | 900 |
-| GET trends/place | 75 | 75 |
-| GET account/verify_credentials | 75 | - |
-| GET application/rate_limit_status | 180 | 180 |
+### `verify_credentials(opts \\ [], client \\ nil) :: response()`
 
-### Longer Windows
+Verifies credentials and returns the authenticated user object.
 
-| Endpoint | Window | User | App |
-|----------|--------|------|-----|
-| POST statuses/update | 3 hours | 300 | 300 |
-| POST statuses/retweet | 3 hours | 300 | 300 |
-| POST favorites/create | 24 hours | 1000 | 1000 |
-| POST friendships/create | 24 hours | 400 | 1000 |
-| POST direct_messages/events/new | 24 hours | 1000 | 15000 |
+| Option | Description |
+|--------|-------------|
+| `:include_email` | Requires special app permission |
+| `:skip_status` | Exclude most recent tweet |
+
+### `settings(client \\ nil) :: response()`
+
+Returns current account settings (GET).
+
+### `update_settings(opts \\ [], client \\ nil) :: response()`
+
+Updates account settings (POST). Options: `:time_zone`, `:lang`, `:sleep_time_enabled`, etc.
+
+### `update_profile(opts \\ [], client \\ nil) :: response()`
+
+Updates profile fields. Options: `:name` (max 50), `:url` (max 100), `:location` (max 30), `:description` (max 160).
+
+### `update_profile_image(image, opts \\ [], client \\ nil) :: response()`
+
+Updates profile avatar. Accepts file path or binary. Max 700 KB. Formats: GIF, JPG, PNG.
+
+### `update_profile_banner(banner, opts \\ [], client \\ nil) :: response()`
+
+Updates profile banner. Accepts file path or binary. Max 5 MB. Recommended: 1500×500 px.
+
+### `remove_profile_banner(client \\ nil) :: response()`
+
+Removes the profile banner.
+
+**Rate Limits** — `verify_credentials`: 75 / 15 min | `settings` (GET): 15 / 15 min | others: 15 / 15 min
 
 ---
 
-## Error Codes
+## `XClient.Trends`
 
-| Code | Description |
-|------|-------------|
-| 32 | Could not authenticate |
-| 34 | Sorry, that page does not exist |
-| 50 | User not found |
-| 63 | User has been suspended |
-| 64 | Your account is suspended |
-| 68 | The X REST API v1 is no longer active |
+Endpoint prefix: `trends/`
+
+### `place(id, opts \\ [], client \\ nil) :: response()`
+
+Returns top trending topics for a WOEID location.
+
+```elixir
+{:ok, [%{"trends" => trends}]} = XClient.Trends.place(1)           # Worldwide
+{:ok, [%{"trends" => trends}]} = XClient.Trends.place(23424848)    # India
+{:ok, [%{"trends" => trends}]} = XClient.Trends.place(1, exclude: "hashtags")
+```
+
+Common WOEIDs: Worldwide `1`, US `23424977`, UK `23424975`, India `23424848`, Canada `23424775`.
+
+### `available(client \\ nil) :: response()`
+
+Returns all locations that X has trending topic data for.
+
+### `closest(opts \\ [], client \\ nil) :: response()`
+
+Returns locations closest to `:lat` / `:long` coordinates.
+
+**Rate Limits** — All: 75 / 15 min
+
+---
+
+## `XClient.Geo`
+
+Endpoint prefix: `geo/`
+
+### `id(place_id, client \\ nil) :: response()`
+
+Returns information about a known X Place by its alphanumeric ID.
+
+```elixir
+{:ok, place} = XClient.Geo.id("df51dec6f4ee2b2c")
+```
+
+**Rate Limits** — 75 / 15 min (user only)
+
+---
+
+## `XClient.Help`
+
+Endpoint prefix: `help/`
+
+### `configuration(client \\ nil) :: response()`
+
+Returns X's current configuration (photo size limits, short URL lengths, etc.).
+
+### `languages(client \\ nil) :: response()`
+
+Returns the list of languages supported by X.
+
+### `privacy(client \\ nil) :: response()`
+
+Returns X's Privacy Policy text.
+
+### `tos(client \\ nil) :: response()`
+
+Returns X's Terms of Service text.
+
+**Rate Limits** — All: 15 / 15 min
+
+---
+
+## `XClient.API`
+
+Endpoint prefix: `application/`
+
+### `rate_limit_status(opts \\ [], client \\ nil) :: response()`
+
+Returns current rate limit windows for all or selected resource families.
+
+```elixir
+{:ok, %{"resources" => r}} = XClient.API.rate_limit_status()
+{:ok, %{"resources" => r}} = XClient.API.rate_limit_status(resources: "statuses,friends")
+
+r["statuses"]["/statuses/user_timeline"]
+#=> %{"limit" => 900, "remaining" => 897, "reset" => 1712345678}
+```
+
+Valid resource families: `statuses`, `friends`, `followers`, `users`, `search`, `lists`, `direct_messages`, `favorites`, `trends`, `geo`, `account`, `application`, `help`.
+
+**Rate Limits** — 180 / 15 min
+
+---
+
+## `XClient.RateLimiter`
+
+Internal GenServer with ETS-backed reads.
+
+### `check_limit(endpoint) :: :ok | {:error, :rate_limited}`
+
+ETS read — non-blocking. Called automatically before every request when `auto_retry: true`.
+
+### `update_limit(endpoint, info) :: :ok`
+
+Async cast. Called automatically after every successful response to ingest `X-Rate-Limit-*` headers.
+
+### `get_limit_info(endpoint) :: map() | nil`
+
+ETS read. Returns `%{limit: integer, remaining: integer, reset: unix_timestamp}` or `nil`.
+
+### `reset_all() :: :ok`
+
+Clears all stored rate limit windows. Useful in tests.
+
+---
+
+## `XClient.Error`
+
+```elixir
+%XClient.Error{
+  status: 429,              # HTTP status code
+  code: 88,                 # X API error code
+  message: "Rate limit…",  # human-readable message
+  errors: [%{...}],        # raw errors list from response body
+  rate_limit_info: %{       # present on 429 responses
+    limit: 900,
+    remaining: 0,
+    reset: 1712345678
+  }
+}
+```
+
+### Common X API Error Codes
+
+| Code | Meaning |
+|------|---------|
+| 32 | Could not authenticate you |
+| 64 | Account suspended |
 | 88 | Rate limit exceeded |
 | 89 | Invalid or expired token |
-| 99 | Unable to verify credentials |
 | 130 | Over capacity |
 | 131 | Internal error |
-| 135 | Could not authenticate |
-| 136 | You have been blocked |
-| 144 | No status found with that ID |
-| 179 | Sorry, you are not authorized |
-| 185 | User is over daily status update limit |
-| 186 | Tweet needs to be a bit shorter |
-| 187 | Status is a duplicate |
-| 215 | Bad authentication data |
-| 226 | This request looks like it might be automated |
-| 231 | User must verify login |
-| 251 | This endpoint has been retired |
-| 261 | Application cannot perform write actions |
-| 271 | You can't mute yourself |
-| 272 | You are not muting this user |
-| 354 | DM length exceeds max length |
+| 135 | Timestamp out of bounds |
+| 161 | Follow limit reached |
+| 179 | Not authorised to see this status |
+| 185 | Status update limit reached |
+| 187 | Duplicate status |
+| 226 | Automated request detected |
+| 261 | Application write access suspended |
+| 326 | Account locked |
 
 ---
 
-For more details, see the [X API documentation](https://developer.x.com/en/docs/x-api/v1).
+## `XClient.Config`
+
+All values can be set via `Application.put_env(:x_client, key, value)` at runtime.
+
+| Function | Default | Description |
+|----------|---------|-------------|
+| `consumer_key/0` | `nil` | OAuth consumer key |
+| `consumer_secret/0` | `nil` | OAuth consumer secret |
+| `access_token/0` | `nil` | OAuth access token |
+| `access_token_secret/0` | `nil` | OAuth access token secret |
+| `base_url/0` | `"https://api.x.com/1.1"` | API base URL |
+| `upload_url/0` | `"https://upload.x.com/1.1"` | Media upload URL |
+| `auto_retry?/0` | `true` | Enable automatic 429 retry |
+| `max_retries/0` | `3` | Maximum retry attempts |
+| `retry_base_delay_ms/0` | `1_000` | Backoff base delay in ms |
+| `request_timeout_ms/0` | `30_000` | HTTP request timeout in ms |
+| `validate!/0` | — | Returns `:ok` or `{:error, {:missing_config, [key]}}` |
