@@ -1,891 +1,737 @@
-# XClient Usage Guide
+# Usage Guide
 
-This guide provides comprehensive examples for using the XClient library.
+Practical patterns and recipes for common tasks with `XClient` v1.1.
+
+---
 
 ## Table of Contents
 
-- [Installation](#installation)
-- [Configuration](#configuration)
-- [Authentication](#authentication)
-- [Tweets](#tweets)
-- [Media Uploads](#media-uploads)
-- [Users](#users)
-- [Friendships](#friendships)
-- [Favorites](#favorites)
-- [Direct Messages](#direct-messages)
-- [Search](#search)
-- [Lists](#lists)
-- [Trends](#trends)
-- [Account Management](#account-management)
-- [Rate Limiting](#rate-limiting)
-- [Error Handling](#error-handling)
+1. [Setup & Configuration](#setup--configuration)
+2. [Authentication](#authentication)
+3. [Posting Tweets](#posting-tweets)
+4. [Reading Timelines](#reading-timelines)
+5. [Search](#search)
+6. [Media Uploads](#media-uploads)
+7. [Users & Relationships](#users--relationships)
+8. [Direct Messages](#direct-messages)
+9. [Lists](#lists)
+10. [Trends](#trends)
+11. [Account Management](#account-management)
+12. [Error Handling](#error-handling)
+13. [Rate Limiting](#rate-limiting)
+14. [Multi-Account Usage](#multi-account-usage)
+15. [Telemetry & Observability](#telemetry--observability)
+16. [Testing Strategies](#testing-strategies)
 
-## Installation
+---
 
-Add to your `mix.exs`:
+## Setup & Configuration
+
+### Installation
 
 ```elixir
+# mix.exs
 def deps do
-  [
-    {:x_client, "~> 1.0.0"}
-  ]
+  [{:x_client, "~> 1.1"}]
 end
 ```
 
-## Configuration
-
-### Basic Configuration
+### Runtime configuration (recommended)
 
 ```elixir
-# config/config.exs
+# config/runtime.exs
 config :x_client,
-  consumer_key: "YOUR_CONSUMER_KEY",
-  consumer_secret: "YOUR_CONSUMER_SECRET",
-  access_token: "YOUR_ACCESS_TOKEN",
-  access_token_secret: "YOUR_ACCESS_TOKEN_SECRET"
+  consumer_key:        System.fetch_env!("X_CONSUMER_KEY"),
+  consumer_secret:     System.fetch_env!("X_CONSUMER_SECRET"),
+  access_token:        System.fetch_env!("X_ACCESS_TOKEN"),
+  access_token_secret: System.fetch_env!("X_ACCESS_TOKEN_SECRET")
 ```
 
-### Environment Variables
+### Indirection via `{:system, "ENV_VAR"}` (lazy resolution)
 
 ```elixir
+# config/config.exs — value resolved at call-time, not at compile-time
 config :x_client,
   consumer_key: {:system, "X_CONSUMER_KEY"},
-  consumer_secret: {:system, "X_CONSUMER_SECRET"},
-  access_token: {:system, "X_ACCESS_TOKEN"},
-  access_token_secret: {:system, "X_ACCESS_TOKEN_SECRET"}
+  consumer_secret: {:system, "X_CONSUMER_SECRET"}
 ```
+
+### Validate credentials at startup
+
+Add to your `Application.start/2` or a supervised task:
+
+```elixir
+case XClient.Config.validate!() do
+  :ok -> :ok
+  {:error, {:missing_config, keys}} ->
+    raise "Missing X credentials: #{inspect(keys)}"
+end
+```
+
+---
 
 ## Authentication
 
-### Verify Credentials
+All requests are signed automatically using OAuth 1.0a (HMAC-SHA1). No action required on your part beyond configuration.
+
+To verify credentials are working:
 
 ```elixir
-# Verify your credentials are working
-case XClient.Account.verify_credentials() do
-  {:ok, account} ->
-    IO.puts("Authenticated as: @#{account["screen_name"]}")
-    
-  {:error, error} ->
-    IO.puts("Authentication failed: #{error.message}")
-end
+{:ok, user} = XClient.verify_credentials()
+IO.puts("Authenticated as @#{user["screen_name"]}")
 ```
 
-## Tweets
+---
 
-### Post a Tweet
+## Posting Tweets
+
+### Simple tweet
 
 ```elixir
-# Simple tweet
-{:ok, tweet} = XClient.Tweets.update("Hello, X! 🚀")
-IO.puts("Tweet ID: #{tweet["id_string"]}")
+{:ok, tweet} = XClient.Tweets.update("Hello from Elixir! 🚀")
+IO.puts("Posted tweet #{tweet["id_string"]}")
+```
 
-# Tweet with location
+### Reply to a tweet
+
+```elixir
+{:ok, reply} = XClient.Tweets.update(
+  "@elixirlang Thanks for the great language!",
+  in_reply_to_status_id: "123456789"
+)
+```
+
+### Tweet with image
+
+```elixir
+{:ok, media} = XClient.Media.upload("priv/photo.jpg")
 {:ok, tweet} = XClient.Tweets.update(
-  "Tweeting from San Francisco!",
+  "Look at this photo!",
+  media_ids: [media["media_id_string"]]
+)
+```
+
+### Tweet with up to 4 images
+
+```elixir
+paths = ["img1.jpg", "img2.jpg", "img3.jpg", "img4.jpg"]
+media_ids = Enum.map(paths, fn path ->
+  {:ok, media} = XClient.Media.upload(path)
+  media["media_id_string"]
+end)
+
+{:ok, tweet} = XClient.Tweets.update("Four photos!", media_ids: media_ids)
+```
+
+### Geo-tagged tweet
+
+```elixir
+{:ok, tweet} = XClient.Tweets.update(
+  "Greetings from San Francisco!",
   lat: 37.7749,
   long: -122.4194,
   display_coordinates: true
 )
 ```
 
-### Reply to a Tweet
+### Delete a tweet
 
 ```elixir
-{:ok, reply} = XClient.Tweets.update(
-  "@username Thanks for the great content!",
-  in_reply_to_status_id: "123456789",
-  auto_populate_reply_metadata: true
-)
+{:ok, deleted} = XClient.Tweets.destroy("123456789")
 ```
 
-### Quote Tweet
+### Retweet / unretweet
 
 ```elixir
-{:ok, quote} = XClient.Tweets.update(
-  "This is amazing! 🎉",
-  attachment_url: "https://x.com/user/status/123456789"
-)
+{:ok, _} = XClient.Tweets.retweet("123456789")
+{:ok, _} = XClient.Tweets.unretweet("123456789")
 ```
 
-### Delete a Tweet
+---
+
+## Reading Timelines
+
+### User timeline (paginated)
 
 ```elixir
-{:ok, deleted_tweet} = XClient.Tweets.destroy("123456789")
+defmodule MyApp.Timeline do
+  def fetch_all(screen_name, acc \\ [], max_id \\ nil) do
+    opts = [screen_name: screen_name, count: 200, tweet_mode: "extended"]
+    opts = if max_id, do: Keyword.put(opts, :max_id, max_id - 1), else: opts
+
+    case XClient.Tweets.user_timeline(opts) do
+      {:ok, []} ->
+        acc
+
+      {:ok, tweets} ->
+        oldest_id = tweets |> List.last() |> Map.fetch!("id")
+        fetch_all(screen_name, acc ++ tweets, oldest_id)
+
+      {:error, error} ->
+        {:error, error}
+    end
+  end
+end
 ```
 
-### Retweet
+### Mentions timeline
 
 ```elixir
-{:ok, retweet} = XClient.Tweets.retweet("123456789")
-
-# Unretweet
-{:ok, tweet} = XClient.Tweets.unretweet("123456789")
-```
-
-### Get a Single Tweet
-
-```elixir
-{:ok, tweet} = XClient.Tweets.show("123456789")
-IO.puts("Tweet text: #{tweet["text"]}")
-IO.puts("Retweet count: #{tweet["retweet_count"]}")
-IO.puts("Like count: #{tweet["favorite_count"]}")
-```
-
-### Get Multiple Tweets
-
-```elixir
-tweet_ids = ["123456789", "987654321", "456789123"]
-{:ok, tweets} = XClient.Tweets.lookup(tweet_ids)
-
-Enum.each(tweets, fn tweet ->
+{:ok, mentions} = XClient.Tweets.mentions_timeline(count: 50)
+Enum.each(mentions, fn tweet ->
   IO.puts("@#{tweet["user"]["screen_name"]}: #{tweet["text"]}")
 end)
 ```
 
-### User Timeline
+### Tweets retweeted by others
 
 ```elixir
-# Get recent tweets from a user
-{:ok, tweets} = XClient.Tweets.user_timeline(
-  screen_name: "elixirlang",
-  count: 50,
-  exclude_replies: false,
-  include_rts: true
-)
-
-Enum.each(tweets, fn tweet ->
-  IO.puts("[#{tweet["created_at"]}] #{tweet["text"]}")
-end)
+{:ok, retweeted} = XClient.Tweets.retweets_of_me(count: 20)
 ```
 
-### Mentions Timeline
-
-```elixir
-# Get your mentions
-{:ok, mentions} = XClient.Tweets.mentions_timeline(count: 100)
-
-Enum.each(mentions, fn mention ->
-  IO.puts("@#{mention["user"]["screen_name"]} mentioned you: #{mention["text"]}")
-end)
-```
-
-### Get Retweets
-
-```elixir
-# Get users who retweeted
-{:ok, retweets} = XClient.Tweets.retweets("123456789", count: 100)
-
-# Get retweeter IDs
-{:ok, %{"ids" => ids}} = XClient.Tweets.retweeters_ids("123456789")
-```
-
-## Media Uploads
-
-### Upload an Image
-
-```elixir
-# Simple upload
-{:ok, media} = XClient.Media.upload("path/to/image.jpg")
-
-# Upload with alt text for accessibility
-{:ok, media} = XClient.Media.upload(
-  "path/to/image.jpg",
-  alt_text: "A beautiful sunset over the ocean"
-)
-
-# Post tweet with image
-{:ok, tweet} = XClient.Tweets.update(
-  "Check out this photo!",
-  media_ids: [media["media_id_string"]]
-)
-```
-
-### Upload Multiple Images
-
-```elixir
-# Upload up to 4 images
-image_paths = ["img1.jpg", "img2.jpg", "img3.jpg", "img4.jpg"]
-
-media_ids = 
-  Enum.map(image_paths, fn path ->
-    {:ok, media} = XClient.Media.upload(path)
-    media["media_id_string"]
-  end)
-
-{:ok, tweet} = XClient.Tweets.update(
-  "Photo gallery! 📸",
-  media_ids: media_ids
-)
-```
-
-### Upload a Video
-
-```elixir
-# Video upload (automatically uses chunked upload if large)
-{:ok, media} = XClient.Media.upload(
-  "path/to/video.mp4",
-  media_category: "tweet_video"
-)
-
-# The library automatically waits for processing
-{:ok, tweet} = XClient.Tweets.update(
-  "My new video!",
-  media_ids: [media["media_id_string"]]
-)
-```
-
-### Upload a GIF
-
-```elixir
-{:ok, media} = XClient.Media.upload(
-  "path/to/animation.gif",
-  media_category: "tweet_gif"
-)
-
-{:ok, tweet} = XClient.Tweets.update(
-  "Awesome GIF!",
-  media_ids: [media["media_id_string"]]
-)
-```
-
-### Upload from Binary Data
-
-```elixir
-# Read file into memory
-image_binary = File.read!("image.jpg")
-
-{:ok, media} = XClient.Media.upload(
-  image_binary,
-  media_type: "image/jpeg",
-  alt_text: "Description of image"
-)
-```
-
-### Check Processing Status
-
-```elixir
-{:ok, status} = XClient.Media.upload_status(media_id)
-
-case status["processing_info"]["state"] do
-  "succeeded" -> IO.puts("Processing complete!")
-  "pending" -> IO.puts("Processing pending...")
-  "in_progress" -> IO.puts("Still processing...")
-  "failed" -> IO.puts("Processing failed")
-end
-```
-
-## Users
-
-### Get User Information
-
-```elixir
-# By screen name
-{:ok, user} = XClient.Users.show(screen_name: "elixirlang")
-
-IO.puts("Name: #{user["name"]}")
-IO.puts("Bio: #{user["description"]}")
-IO.puts("Followers: #{user["followers_count"]}")
-IO.puts("Following: #{user["friends_count"]}")
-
-# By user ID
-{:ok, user} = XClient.Users.show(user_id: "123456")
-```
-
-### Lookup Multiple Users
-
-```elixir
-# By screen names
-{:ok, users} = XClient.Users.lookup(
-  screen_name: ["elixirlang", "josevalim", "chris_mccord"]
-)
-
-# By user IDs
-{:ok, users} = XClient.Users.lookup(
-  user_id: ["123456", "789012", "345678"]
-)
-
-Enum.each(users, fn user ->
-  IO.puts("@#{user["screen_name"]}: #{user["description"]}")
-end)
-```
-
-### Search Users
-
-```elixir
-{:ok, users} = XClient.Users.search("elixir developer", count: 20)
-
-Enum.each(users, fn user ->
-  IO.puts("@#{user["screen_name"]} - #{user["name"]}")
-end)
-```
-
-## Friendships
-
-### Follow a User
-
-```elixir
-# By screen name
-{:ok, user} = XClient.Friendships.create(screen_name: "elixirlang")
-IO.puts("Now following @#{user["screen_name"]}")
-
-# By user ID with notifications
-{:ok, user} = XClient.Friendships.create(
-  user_id: "123456",
-  follow: true  # Enable notifications
-)
-```
-
-### Unfollow a User
-
-```elixir
-{:ok, user} = XClient.Friendships.destroy(screen_name: "example")
-IO.puts("Unfollowed @#{user["screen_name"]}")
-```
-
-### Check Relationship
-
-```elixir
-{:ok, relationship} = XClient.Friendships.show(
-  source_screen_name: "me",
-  target_screen_name: "elixirlang"
-)
-
-source = relationship["relationship"]["source"]
-target = relationship["relationship"]["target"]
-
-IO.puts("Following: #{source["following"]}")
-IO.puts("Followed by: #{source["followed_by"]}")
-```
-
-### Get Followers
-
-```elixir
-# Get follower IDs (up to 5000 per page)
-{:ok, %{"ids" => ids, "next_cursor" => cursor}} = 
-  XClient.Friendships.followers_ids(
-    screen_name: "elixirlang",
-    count: 5000
-  )
-
-IO.puts("Found #{length(ids)} followers")
-
-# Get follower details
-{:ok, %{"users" => users, "next_cursor" => cursor}} = 
-  XClient.Friendships.followers_list(
-    screen_name: "elixirlang",
-    count: 200
-  )
-
-Enum.each(users, fn user ->
-  IO.puts("@#{user["screen_name"]} - #{user["name"]}")
-end)
-```
-
-### Get Following
-
-```elixir
-# Get IDs of users you're following
-{:ok, %{"ids" => ids}} = XClient.Friendships.friends_ids(
-  screen_name: "elixirlang"
-)
-
-# Get details
-{:ok, %{"users" => users}} = XClient.Friendships.friends_list(
-  screen_name: "elixirlang",
-  count: 200
-)
-```
-
-### Pagination Example
-
-```elixir
-defmodule FollowerFetcher do
-  def fetch_all_followers(screen_name) do
-    fetch_page(screen_name, -1, [])
-  end
-
-  defp fetch_page(screen_name, cursor, acc) do
-    {:ok, %{"ids" => ids, "next_cursor" => next_cursor}} = 
-      XClient.Friendships.followers_ids(
-        screen_name: screen_name,
-        cursor: cursor
-      )
-
-    new_acc = acc ++ ids
-
-    if next_cursor == 0 do
-      new_acc
-    else
-      # Add delay to respect rate limits
-      Process.sleep(1000)
-      fetch_page(screen_name, next_cursor, new_acc)
-    end
-  end
-end
-
-# Usage
-all_followers = FollowerFetcher.fetch_all_followers("elixirlang")
-IO.puts("Total followers: #{length(all_followers)}")
-```
-
-## Favorites
-
-### Like a Tweet
-
-```elixir
-{:ok, tweet} = XClient.Favorites.create("123456789")
-IO.puts("Liked tweet by @#{tweet["user"]["screen_name"]}")
-```
-
-### Unlike a Tweet
-
-```elixir
-{:ok, tweet} = XClient.Favorites.destroy("123456789")
-```
-
-### Get Liked Tweets
-
-```elixir
-# Get your liked tweets
-{:ok, favorites} = XClient.Favorites.list(count: 200)
-
-# Get someone else's liked tweets
-{:ok, favorites} = XClient.Favorites.list(
-  screen_name: "elixirlang",
-  count: 100
-)
-
-Enum.each(favorites, fn tweet ->
-  IO.puts("[#{tweet["created_at"]}] #{tweet["text"]}")
-end)
-```
-
-## Direct Messages
-
-### Send a DM
-
-```elixir
-# Simple text message
-{:ok, message} = XClient.DirectMessages.send(
-  "123456",  # recipient user ID
-  "Hello! Thanks for following."
-)
-
-# With media attachment
-{:ok, media} = XClient.Media.upload("image.jpg")
-{:ok, message} = XClient.DirectMessages.send(
-  "123456",
-  "Check this out!",
-  media_id: media["media_id_string"]
-)
-
-# With quick reply options
-{:ok, message} = XClient.DirectMessages.send(
-  "123456",
-  "How can I help you?",
-  quick_reply_options: ["Support", "Sales", "General Question"]
-)
-```
-
-### List DMs
-
-```elixir
-{:ok, %{"events" => messages}} = XClient.DirectMessages.list(count: 50)
-
-Enum.each(messages, fn event ->
-  message = event["message_create"]["message_data"]
-  IO.puts("Message: #{message["text"]}")
-end)
-```
-
-### Get a Single DM
-
-```elixir
-{:ok, event} = XClient.DirectMessages.show("123456789")
-```
-
-### Delete a DM
-
-```elixir
-{:ok, _} = XClient.DirectMessages.destroy("123456789")
-```
+---
 
 ## Search
 
-### Basic Search
+### Basic search
 
 ```elixir
-{:ok, %{"statuses" => tweets}} = XClient.Search.tweets(
-  "elixir lang",
-  count: 100
-)
-
-Enum.each(tweets, fn tweet ->
-  IO.puts("@#{tweet["user"]["screen_name"]}: #{tweet["text"]}")
-end)
+{:ok, %{"statuses" => tweets, "search_metadata" => meta}} =
+  XClient.Search.tweets("elixir lang", count: 100, result_type: "recent")
 ```
 
-### Advanced Search with Filters
+### Paginating search results backwards
 
 ```elixir
-# Search with geocoding
-{:ok, results} = XClient.Search.tweets(
-  "coffee",
-  geocode: "37.7749,-122.4194,5mi",  # San Francisco, 5 mile radius
-  result_type: "recent",
-  count: 100
-)
+defmodule MyApp.Search do
+  def collect(query, target \\ 500) do
+    fetch_page(query, target, [], nil)
+  end
 
-# Search with language filter
-{:ok, results} = XClient.Search.tweets(
-  "phoenix framework",
-  lang: "en",
-  result_type: "popular"
-)
+  defp fetch_page(_query, target, acc, _max_id) when length(acc) >= target, do: acc
 
-# Search with date range
-{:ok, results} = XClient.Search.tweets(
-  "elixir",
-  until: "2024-12-31",
-  count: 100
-)
+  defp fetch_page(query, target, acc, max_id) do
+    opts = [count: 100, result_type: "recent", tweet_mode: "extended"]
+    opts = if max_id, do: Keyword.put(opts, :max_id, max_id - 1), else: opts
+
+    case XClient.Search.tweets(query, opts) do
+      {:ok, %{"statuses" => []}} ->
+        acc
+
+      {:ok, %{"statuses" => tweets}} ->
+        oldest_id = tweets |> List.last() |> Map.fetch!("id")
+        fetch_page(query, target, acc ++ tweets, oldest_id)
+
+      {:error, _} = error ->
+        error
+    end
+  end
+end
 ```
 
-### Search Operators
+### Geo-restricted search
 
 ```elixir
-# Exact phrase
-XClient.Search.tweets("\"elixir phoenix\"")
-
-# Multiple words
-XClient.Search.tweets("elixir AND phoenix")
-
-# Exclude words
-XClient.Search.tweets("elixir -java")
-
-# From specific user
-XClient.Search.tweets("from:elixirlang")
-
-# To specific user
-XClient.Search.tweets("to:josevalim")
-
-# Mentions
-XClient.Search.tweets("@elixirlang")
-
-# Hashtags
-XClient.Search.tweets("#myelixirstatus")
-
-# Positive sentiment
-XClient.Search.tweets("elixir :)")
-
-# Questions only
-XClient.Search.tweets("elixir ?")
-
-# With links
-XClient.Search.tweets("elixir filter:links")
+{:ok, %{"statuses" => local_tweets}} =
+  XClient.Search.tweets("coffee",
+    geocode: "37.781157,-122.398720,5mi",
+    result_type: "recent",
+    count: 50
+  )
 ```
+
+---
+
+## Media Uploads
+
+### Image from file path
+
+```elixir
+{:ok, media} = XClient.Media.upload("priv/images/photo.jpg")
+# media["media_id_string"] is used when posting
+```
+
+### Image from binary
+
+```elixir
+image_data = File.read!("priv/images/photo.png")
+{:ok, media} = XClient.Media.upload(image_data, media_type: "image/png")
+```
+
+### Image with alt text (accessibility)
+
+```elixir
+{:ok, media} = XClient.Media.upload("priv/photo.jpg",
+  alt_text: "A golden retriever playing fetch on a sunny beach")
+```
+
+### Video (auto-chunked for large files)
+
+```elixir
+{:ok, media} = XClient.Media.upload("priv/videos/clip.mp4",
+  media_category: "tweet_video")
+
+# The library waits for processing to complete automatically.
+# Then attach to a tweet:
+{:ok, tweet} = XClient.Tweets.update(
+  "Check out my video!",
+  media_ids: [media["media_id_string"]]
+)
+```
+
+### Manually check video processing status
+
+```elixir
+{:ok, status} = XClient.Media.upload_status("111222333")
+case status["processing_info"]["state"] do
+  "succeeded" -> IO.puts("Ready!")
+  "failed"    -> IO.puts("Processing failed: #{inspect(status["processing_info"]["error"])}")
+  state       -> IO.puts("Still processing: #{state}")
+end
+```
+
+### Animated GIF
+
+```elixir
+{:ok, media} = XClient.Media.upload("priv/animation.gif",
+  media_category: "tweet_gif")
+```
+
+---
+
+## Users & Relationships
+
+### Look up a user
+
+```elixir
+{:ok, user} = XClient.Users.show(screen_name: "elixirlang")
+{:ok, user} = XClient.Users.show(user_id: "123456")
+```
+
+### Look up multiple users
+
+```elixir
+{:ok, users} = XClient.Users.lookup(screen_name: ["user1", "user2", "user3"])
+{:ok, users} = XClient.Users.lookup(user_id: ["1111", "2222"])
+```
+
+### Search for users
+
+```elixir
+{:ok, results} = XClient.Users.search("elixir developer", count: 20)
+```
+
+### Follow / unfollow
+
+```elixir
+{:ok, user} = XClient.Friendships.create(screen_name: "elixirlang")
+{:ok, user} = XClient.Friendships.destroy(screen_name: "elixirlang")
+```
+
+### Check relationship between two users
+
+```elixir
+{:ok, %{"relationship" => rel}} = XClient.Friendships.show(
+  source_screen_name: "user_a",
+  target_screen_name: "user_b"
+)
+
+IO.puts("Following: #{rel["source"]["following"]}")
+IO.puts("Followed by: #{rel["source"]["followed_by"]}")
+```
+
+### Paginate followers
+
+```elixir
+defmodule MyApp.Followers do
+  def fetch_all_ids(screen_name) do
+    collect(screen_name, [], -1)
+  end
+
+  defp collect(_sn, acc, 0), do: {:ok, acc}
+  defp collect(screen_name, acc, cursor) do
+    case XClient.Friendships.followers_ids(screen_name: screen_name, cursor: cursor) do
+      {:ok, %{"ids" => ids, "next_cursor" => next}} ->
+        collect(screen_name, acc ++ ids, next)
+      {:error, _} = err -> err
+    end
+  end
+end
+```
+
+### Like / unlike
+
+```elixir
+{:ok, _tweet} = XClient.Favorites.create("123456789")
+{:ok, _tweet} = XClient.Favorites.destroy("123456789")
+```
+
+### Get liked tweets
+
+```elixir
+{:ok, likes} = XClient.Favorites.list(screen_name: "elixirlang", count: 200)
+```
+
+---
+
+## Direct Messages
+
+### Send a plain DM
+
+```elixir
+{:ok, event} = XClient.DirectMessages.send("987654321", "Hey! How are you?")
+```
+
+### Send a DM with media
+
+```elixir
+{:ok, media} = XClient.Media.upload("priv/image.jpg", media_category: "dm_image")
+{:ok, event} = XClient.DirectMessages.send(
+  "987654321",
+  "Check out this image!",
+  media_id: media["media_id_string"]
+)
+```
+
+### Send a DM with quick-reply buttons
+
+```elixir
+{:ok, event} = XClient.DirectMessages.send(
+  "987654321",
+  "Would you like to subscribe?",
+  quick_reply_options: ["Yes, sign me up!", "No thanks", "Tell me more"]
+)
+```
+
+### List DMs (with pagination)
+
+```elixir
+{:ok, %{"events" => events, "next_cursor" => cursor}} =
+  XClient.DirectMessages.list(count: 50)
+
+# Next page
+{:ok, %{"events" => more}} =
+  XClient.DirectMessages.list(count: 50, cursor: cursor)
+```
+
+---
 
 ## Lists
 
-### Get All Lists
+### Get your lists
 
 ```elixir
 {:ok, lists} = XClient.Lists.list()
-
-Enum.each(lists, fn list ->
-  IO.puts("#{list["name"]} - #{list["member_count"]} members")
-end)
+{:ok, lists} = XClient.Lists.list(screen_name: "elixirlang")
 ```
 
-### Get List Timeline
+### Get tweets from a list
 
 ```elixir
-{:ok, tweets} = XClient.Lists.statuses(
-  list_id: "123456",
-  count: 100
-)
-
-# Or by slug and owner
-{:ok, tweets} = XClient.Lists.statuses(
-  slug: "team",
-  owner_screen_name: "x",
-  count: 100
-)
+{:ok, tweets} = XClient.Lists.statuses(list_id: "123456", count: 100)
+{:ok, tweets} = XClient.Lists.statuses(slug: "my-list", owner_screen_name: "me", count: 50)
 ```
 
-### Get List Members
+### Get list members
 
 ```elixir
-{:ok, %{"users" => members}} = XClient.Lists.members(
-  list_id: "123456",
-  count: 100
-)
-
-Enum.each(members, fn user ->
-  IO.puts("@#{user["screen_name"]} - #{user["name"]}")
-end)
+{:ok, %{"users" => members, "next_cursor" => cursor}} =
+  XClient.Lists.members(list_id: "123456")
 ```
 
-### Check List Membership
+### Check list membership
 
 ```elixir
-case XClient.Lists.members_show(
-  list_id: "123456",
-  screen_name: "elixirlang"
-) do
-  {:ok, user} -> IO.puts("User is a member")
-  {:error, _} -> IO.puts("User is not a member")
+case XClient.Lists.members_show(list_id: "123456", screen_name: "elixirlang") do
+  {:ok, _user}          -> IO.puts("Is a member")
+  {:error, %{status: 404}} -> IO.puts("Not a member")
 end
 ```
+
+---
 
 ## Trends
 
-### Get Trending Topics
+### Worldwide trends
 
 ```elixir
-# Worldwide trends
 {:ok, [%{"trends" => trends}]} = XClient.Trends.place(1)
-
-Enum.each(trends, fn trend ->
-  IO.puts("#{trend["name"]} - #{trend["tweet_volume"]} tweets")
-end)
-
-# US trends
-{:ok, [%{"trends" => trends}]} = XClient.Trends.place(23424977)
-
-# New York trends
-{:ok, [%{"trends" => trends}]} = XClient.Trends.place(2459115)
+top = Enum.take(trends, 5)
+Enum.each(top, fn t -> IO.puts("#{t["name"]} (#{t["tweet_volume"]})") end)
 ```
 
-### Get Available Trend Locations
+### Country/city trends
 
 ```elixir
-{:ok, locations} = XClient.Trends.available()
-
-Enum.each(locations, fn location ->
-  IO.puts("#{location["name"]} (WOEID: #{location["woeid"]})")
-end)
+{:ok, [%{"trends" => us_trends}]} = XClient.Trends.place(23424977)  # United States
+{:ok, [%{"trends" => ny_trends}]} = XClient.Trends.place(2459115)   # New York City
 ```
 
-### Find Closest Trend Location
+### Find nearby trending locations
 
 ```elixir
-{:ok, [location]} = XClient.Trends.closest(
-  lat: 37.7749,
-  long: -122.4194
-)
-
-IO.puts("Closest location: #{location["name"]}")
+{:ok, locations} = XClient.Trends.closest(lat: 12.9716, long: 77.5946)  # Bengaluru
 ```
+
+---
 
 ## Account Management
 
-### Update Profile
+### Update profile
 
 ```elixir
 {:ok, user} = XClient.Account.update_profile(
-  name: "New Display Name",
-  description: "Elixir developer | Phoenix enthusiast",
-  location: "San Francisco, CA",
-  url: "https://example.com"
+  name: "Jane Smith",
+  description: "Elixir developer | Open source contributor",
+  url: "https://example.com",
+  location: "Bengaluru, India"
 )
 ```
 
-### Update Profile Image
+### Update profile picture
 
 ```elixir
-{:ok, user} = XClient.Account.update_profile_image("path/to/avatar.jpg")
+{:ok, user} = XClient.Account.update_profile_image("priv/avatar.jpg")
 ```
 
-### Update Profile Banner
+### Update banner
 
 ```elixir
-{:ok, _} = XClient.Account.update_profile_banner("path/to/banner.jpg")
+{:ok, _} = XClient.Account.update_profile_banner("priv/banner.jpg")
 ```
 
-### Get Account Settings
+### Update settings
 
 ```elixir
-{:ok, settings} = XClient.Account.settings()
-IO.puts("Time zone: #{settings["time_zone"]["name"]}")
-IO.puts("Language: #{settings["language"]}")
-```
-
-## Rate Limiting
-
-### Check Rate Limit Status
-
-```elixir
-# Get all rate limits
-{:ok, limits} = XClient.Application.rate_limit_status()
-
-# Get specific resource limits
-{:ok, limits} = XClient.Application.rate_limit_status(
-  resources: "statuses,users,search"
+{:ok, settings} = XClient.Account.update_settings(
+  time_zone: "Asia/Kolkata",
+  lang: "en"
 )
-
-# Check specific endpoint
-statuses = limits["resources"]["statuses"]
-user_timeline = statuses["/statuses/user_timeline"]
-
-IO.puts("Limit: #{user_timeline["limit"]}")
-IO.puts("Remaining: #{user_timeline["remaining"]}")
-IO.puts("Resets at: #{user_timeline["reset"]}")
 ```
 
-### Handle Rate Limits Manually
-
-```elixir
-case XClient.Tweets.user_timeline(screen_name: "elixirlang") do
-  {:ok, tweets} ->
-    IO.puts("Got #{length(tweets)} tweets")
-
-  {:error, %{status: 429, rate_limit_info: info}} ->
-    reset_time = DateTime.from_unix!(info[:reset])
-    wait_seconds = DateTime.diff(reset_time, DateTime.utc_now())
-    IO.puts("Rate limited. Wait #{wait_seconds} seconds")
-
-  {:error, error} ->
-    IO.puts("Error: #{error.message}")
-end
-```
+---
 
 ## Error Handling
 
-### Comprehensive Error Handling
+### Pattern match on specific errors
 
 ```elixir
-defmodule TweetPoster do
-  def post_with_retry(text, max_retries \\ 3) do
-    do_post(text, 0, max_retries)
-  end
+case XClient.Tweets.update("Hello!") do
+  {:ok, tweet} ->
+    {:ok, tweet["id_string"]}
 
-  defp do_post(text, attempt, max_retries) when attempt < max_retries do
-    case XClient.Tweets.update(text) do
-      {:ok, tweet} ->
-        {:ok, tweet}
+  {:error, %XClient.Error{status: 429, rate_limit_info: %{reset: reset}}} ->
+    wait_ms = (reset - :os.system_time(:second)) * 1_000
+    Process.sleep(max(wait_ms, 0))
+    XClient.Tweets.update("Hello!")  # retry
 
-      {:error, %{status: 429}} when attempt < max_retries - 1 ->
-        # Rate limited, wait and retry
-        wait_time = :math.pow(2, attempt) * 1000 |> round()
-        Process.sleep(wait_time)
-        do_post(text, attempt + 1, max_retries)
+  {:error, %XClient.Error{code: 187}} ->
+    {:error, :duplicate_tweet}
 
-      {:error, %{status: 403}} ->
-        {:error, "Forbidden - check credentials or tweet content"}
+  {:error, %XClient.Error{code: 226}} ->
+    {:error, :automated_request_detected}
 
-      {:error, %{status: 401}} ->
-        {:error, "Unauthorized - check authentication"}
+  {:error, %XClient.Error{status: 401}} ->
+    {:error, :authentication_failed}
 
-      {:error, %{status: 404}} ->
-        {:error, "Not found"}
-
-      {:error, error} ->
-        {:error, "Unknown error: #{error.message}"}
-    end
-  end
-
-  defp do_post(_text, _attempt, _max_retries) do
-    {:error, "Max retries exceeded"}
-  end
-end
-
-# Usage
-case TweetPoster.post_with_retry("Hello!") do
-  {:ok, tweet} -> IO.puts("Posted: #{tweet["id_string"]}")
-  {:error, reason} -> IO.puts("Failed: #{reason}")
+  {:error, %XClient.Error{message: msg}} ->
+    {:error, msg}
 end
 ```
 
-## Advanced Examples
-
-### Bot that Replies to Mentions
+### Raising on error (bang-style wrapper)
 
 ```elixir
-defmodule MentionBot do
-  def run do
-    # Get last processed mention ID from storage
-    since_id = get_last_mention_id()
+defmodule MyApp.X do
+  def update!(text, opts \\ []) do
+    case XClient.Tweets.update(text, opts) do
+      {:ok, tweet} -> tweet
+      {:error, error} -> raise error
+    end
+  end
+end
+```
 
-    {:ok, mentions} = XClient.Tweets.mentions_timeline(
-      since_id: since_id,
-      count: 200
+---
+
+## Rate Limiting
+
+### Automatic retry (default behaviour)
+
+When a 429 response is received and `auto_retry: true`, the library:
+1. Reads the `X-Rate-Limit-Reset` header
+2. Sleeps for `retry_base_delay_ms * 2^attempt` milliseconds
+3. Retries up to `max_retries` times
+
+### Disable automatic retry
+
+```elixir
+# In config
+config :x_client, auto_retry: false
+
+# Or handle 429 manually:
+case XClient.Search.tweets("elixir") do
+  {:error, %XClient.Error{status: 429, rate_limit_info: info}} ->
+    reset_in = info[:reset] - :os.system_time(:second)
+    IO.puts("Rate limited for #{reset_in}s")
+  result -> result
+end
+```
+
+### Inspect stored rate limit state
+
+```elixir
+# After making a request, the library stores the window info
+info = XClient.RateLimiter.get_limit_info("statuses/user_timeline.json")
+# => %{limit: 900, remaining: 842, reset: 1712345678}
+
+# Check all limits via the API
+{:ok, %{"resources" => r}} = XClient.API.rate_limit_status()
+timeline_limit = r["statuses"]["/statuses/user_timeline"]
+# => %{"limit" => 900, "remaining" => 842, "reset" => 1712345678}
+```
+
+---
+
+## Multi-Account Usage
+
+All public API functions accept an optional `%XClient.Client{}` as their last argument (or first, for `Tweets.update/3`):
+
+```elixir
+account_a = XClient.client(
+  consumer_key: "CK_A", consumer_secret: "CS_A",
+  access_token: "AT_A", access_token_secret: "ATS_A"
+)
+
+account_b = XClient.client(
+  consumer_key: "CK_B", consumer_secret: "CS_B",
+  access_token: "AT_B", access_token_secret: "ATS_B"
+)
+
+{:ok, tweet_a} = XClient.Tweets.update(account_a, "Hello from account A!")
+{:ok, tweet_b} = XClient.Tweets.update(account_b, "Hello from account B!")
+
+{:ok, timeline} = XClient.Tweets.user_timeline([screen_name: "elixirlang"], account_a)
+```
+
+---
+
+## Telemetry & Observability
+
+### Attach a handler
+
+```elixir
+# lib/my_app/telemetry.ex
+defmodule MyApp.Telemetry do
+  def setup do
+    :telemetry.attach_many(
+      "my-app-x-client",
+      [
+        [:x_client, :request, :start],
+        [:x_client, :request, :stop],
+        [:x_client, :request, :error],
+        [:x_client, :rate_limit, :blocked]
+      ],
+      &handle_event/4,
+      nil
     )
-
-    Enum.each(mentions, &process_mention/1)
-
-    # Save last processed ID
-    if length(mentions) > 0 do
-      save_last_mention_id(hd(mentions)["id_string"])
-    end
   end
 
-  defp process_mention(mention) do
-    tweet_id = mention["id_string"]
-    username = mention["user"]["screen_name"]
-    text = mention["text"]
-
-    # Generate reply
-    reply_text = "@#{username} Thanks for your mention!"
-
-    {:ok, _reply} = XClient.Tweets.update(
-      reply_text,
-      in_reply_to_status_id: tweet_id,
-      auto_populate_reply_metadata: true
+  def handle_event([:x_client, :request, :stop], %{duration_us: duration}, meta, _) do
+    :telemetry.execute(
+      [:my_app, :x_api, :request],
+      %{duration: duration},
+      %{endpoint: meta.endpoint, status: meta.status}
     )
-
-    IO.puts("Replied to @#{username}")
   end
 
-  defp get_last_mention_id, do: nil  # Implement storage
-  defp save_last_mention_id(_id), do: :ok  # Implement storage
+  def handle_event([:x_client, :rate_limit, :blocked], _measurements, %{endpoint: ep}, _) do
+    Logger.warning("X API rate limited on #{ep}")
+  end
+
+  def handle_event(_event, _measurements, _meta, _config), do: :ok
 end
 ```
 
-### Scheduled Tweet Poster
+### Integrate with LiveDashboard or Prometheus
 
 ```elixir
-defmodule ScheduledPoster do
-  use GenServer
+# Using PromEx or TelemetryMetrics
+[
+  counter("x_client.request.stop.count", tags: [:endpoint, :status]),
+  distribution("x_client.request.stop.duration_us",
+    unit: {:microsecond, :millisecond},
+    tags: [:endpoint]
+  ),
+  counter("x_client.rate_limit.blocked.count", tags: [:endpoint])
+]
+```
 
-  def start_link(opts) do
-    GenServer.start_link(__MODULE__, opts, name: __MODULE__)
+---
+
+## Testing Strategies
+
+### Using Bypass for HTTP interception
+
+```elixir
+defmodule MyApp.XClientTest do
+  use ExUnit.Case
+
+  setup do
+    bypass = Bypass.open()
+    Application.put_env(:x_client, :base_url, "http://localhost:#{bypass.port}")
+    Application.put_env(:x_client, :consumer_key, "test_key")
+    Application.put_env(:x_client, :consumer_secret, "test_secret")
+    Application.put_env(:x_client, :access_token, "test_token")
+    Application.put_env(:x_client, :access_token_secret, "test_token_secret")
+
+    on_exit(fn ->
+      Application.delete_env(:x_client, :base_url)
+      Application.delete_env(:x_client, :consumer_key)
+      Application.delete_env(:x_client, :consumer_secret)
+      Application.delete_env(:x_client, :access_token)
+      Application.delete_env(:x_client, :access_token_secret)
+    end)
+
+    {:ok, bypass: bypass}
   end
 
-  def schedule_tweet(text, datetime) do
-    GenServer.cast(__MODULE__, {:schedule, text, datetime})
-  end
+  test "posts a tweet", %{bypass: bypass} do
+    tweet = %{"id_string" => "42", "text" => "Hello!"}
 
-  @impl true
-  def init(_opts) do
-    {:ok, %{scheduled: []}}
-  end
+    Bypass.expect_once(bypass, "POST", "/1.1/statuses/update.json", fn conn ->
+      conn
+      |> Plug.Conn.put_resp_header("content-type", "application/json")
+      |> Plug.Conn.send_resp(200, Jason.encode!(tweet))
+    end)
 
-  @impl true
-  def handle_cast({:schedule, text, datetime}, state) do
-    delay = DateTime.diff(datetime, DateTime.utc_now(), :millisecond)
-
-    if delay > 0 do
-      Process.send_after(self(), {:post, text}, delay)
-      {:noreply, %{state | scheduled: [{text, datetime} | state.scheduled]}}
-    else
-      {:noreply, state}
-    end
-  end
-
-  @impl true
-  def handle_info({:post, text}, state) do
-    case XClient.Tweets.update(text) do
-      {:ok, tweet} ->
-        IO.puts("Posted scheduled tweet: #{tweet["id_string"]}")
-
-      {:error, error} ->
-        IO.puts("Failed to post: #{error.message}")
-    end
-
-    {:noreply, state}
+    assert {:ok, %{"id_string" => "42"}} = XClient.Tweets.update("Hello!")
   end
 end
 ```
 
-This comprehensive guide covers all major features of the XClient library. Refer to the module documentation for complete parameter details and additional options.
+### Using Mox for behaviour-based mocking
+
+```elixir
+# test/support/mocks.ex
+Mox.defmock(XClient.HTTPMock, for: XClient.HTTPBehaviour)
+
+# In your test
+test "handles API errors" do
+  XClient.HTTPMock
+  |> expect(:get, fn _endpoint, _params, _client, _opts ->
+    {:error, %XClient.Error{status: 503, message: "Service unavailable"}}
+  end)
+
+  assert {:error, %{status: 503}} = MyApp.X.fetch_timeline("elixirlang")
+end
+```
+
+### Resetting rate limiter between tests
+
+```elixir
+setup do
+  XClient.RateLimiter.reset_all()
+  :ok
+end
+```
