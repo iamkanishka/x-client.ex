@@ -11,7 +11,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
-## [1.1.0] — 2026-03-15
+## [1.1.1] — 2026-03-15
 
 This release is a comprehensive refactor and hardening pass. The public API
 surface is **backwards-compatible** with v1.0.0 with the exception of
@@ -142,6 +142,6 @@ use struct access instead.
 - Basic error struct `%XClient.Error{}`.
 - `ExDoc` documentation.
 
-[Unreleased]: https://github.com/iamkanishka/x-client.ex/compare/v1.1.0...HEAD
-[1.1.0]: https://github.com/iamkanishka/x-client.ex/compare/v1.0.0...v1.1.0
+[Unreleased]: https://github.com/iamkanishka/x-client.ex/compare/v1.1.1...HEAD
+[1.1.1]: https://github.com/iamkanishka/x-client.ex/compare/v1.0.0...v1.1.1
 [1.0.0]: https://github.com/iamkanishka/x-client.ex/releases/tag/v1.0.0
