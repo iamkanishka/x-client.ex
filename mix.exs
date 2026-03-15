@@ -1,7 +1,7 @@
 defmodule XClient.MixProject do
   use Mix.Project
 
-  @version "1.1.0"
+  @version "1.1.1"
   @source_url "https://github.com/iamkanishka/x-client.ex"
 
   def project do
@@ -77,7 +77,9 @@ defmodule XClient.MixProject do
       maintainers: ["iamkanishka"],
       links: %{
         "GitHub" => @source_url,
-        "Changelog" => "#{@source_url}/CHANGELOG.md",
+        "Changelog" => "#{@source_url}/blob/master/CHANGELOG.md",
+        "API Reference" => "#{@source_url}/blob/master/API_REFERENCE.md",
+        "Usage Guide" => "#{@source_url}/blob/master/USAGE_GUIDE.md",
         "X API Docs" => "https://developer.x.com/en/docs/x-api/v1"
       }
     ]
