@@ -1,8 +1,8 @@
 defmodule XClient.MixProject do
   use Mix.Project
 
-  @version "1.0.0"
-  @source_url "https://github.com/iamkanishka/x-client.ex.git"
+  @version "1.1.0"
+  @source_url "https://github.com/iamkanishka/x-client.ex"
 
   def project do
     [
@@ -10,12 +10,21 @@ defmodule XClient.MixProject do
       version: @version,
       elixir: "~> 1.18",
       start_permanent: Mix.env() == :prod,
+      elixirc_paths: elixirc_paths(Mix.env()),
       deps: deps(),
       description: description(),
       package: package(),
       docs: docs(),
       name: "XClient",
-      source_url: @source_url
+      source_url: @source_url,
+      dialyzer: [
+        plt_add_apps: [:ex_unit, :mix],
+        plt_core_path: "priv/plts",
+        plt_file: {:no_warn, "priv/plts/dialyzer.plt"},
+        flags: [:error_handling, :missing_return, :underspecs],
+        ignore_warnings: ".dialyzer_ignore.exs"
+      ],
+      aliases: aliases()
     ]
   end
 
@@ -26,58 +35,104 @@ defmodule XClient.MixProject do
     ]
   end
 
+  defp elixirc_paths(:test), do: ["lib", "test/support"]
+  defp elixirc_paths(_), do: ["lib"]
+
   defp deps do
     [
-      # HTTP client
-      {:req, "~> 0.4.0"},
-
-      # JSON encoding/decoding
+      # ── Runtime ───────────────────────────────────────────
+      {:req, "~> 0.4"},
       {:jason, "~> 1.4"},
-
-      # OAuth 1.0a signature
       {:oauther, "~> 1.3"},
-
-      # Rate limiting
-      {:ex_rated, "~> 2.1"},
-
-      # MIME type detection for media uploads
       {:mime, "~> 2.0"},
+      {:telemetry, "~> 1.2"},
 
-      # Documentation
-      {:ex_doc, "~> 0.31", only: :dev, runtime: false},
+      # ── Documentation ─────────────────────────────────────
+      {:ex_doc, "~> 0.40", only: :dev, runtime: false},
 
-      # Testing
-      {:mox, "~> 1.1", only: :test},
+      # ── Static analysis ───────────────────────────────────
+      {:credo, "~> 1.7", only: [:dev, :test], runtime: false},
+      {:dialyxir, "~> 1.4", only: [:dev], runtime: false},
+
+      # ── Testing ───────────────────────────────────────────
+      {:mox, "~> 1.2", only: :test},
       {:bypass, "~> 2.1", only: :test}
     ]
   end
 
   defp description do
     """
-    A comprehensive Elixir client for X API v1.1 with full endpoint coverage,
-    rate limiting, multimedia support, and OAuth 1.0a authentication.
+    A comprehensive Elixir client for X (Twitter) API v1.1 with full endpoint coverage,
+    built-in rate limiting, chunked media uploads, OAuth 1.0a, telemetry, and zero-config
+    environment-variable support.
     """
   end
 
   defp package do
     [
       name: "x_client",
-      files: ~w(lib .formatter.exs mix.exs README* LICENSE* CHANGELOG* USAGE_GUIDE* API_REFERENCE*),
+      files:
+        ~w(lib config .formatter.exs mix.exs README* LICENSE* CHANGELOG* USAGE_GUIDE* API_REFERENCE*),
       licenses: ["MIT"],
+      maintainers: ["iamkanishka"],
       links: %{
         "GitHub" => @source_url,
-        "Changelog" => "#{@source_url}/blob/main/CHANGELOG.md"
-      },
-      maintainers: ["Your Name"]
+        "Changelog" => "#{@source_url}/CHANGELOG.md",
+        "X API Docs" => "https://developer.x.com/en/docs/x-api/v1"
+      }
     ]
   end
 
   defp docs do
     [
       main: "readme",
-      extras: ["README.md", "CHANGELOG.md"],
+      extras: ["README.md"],
       source_ref: "v#{@version}",
-      source_url: @source_url
+      source_url: @source_url,
+      groups_for_modules: [
+        "API Modules": [
+          XClient.Tweets,
+          XClient.Media,
+          XClient.Users,
+          XClient.Friendships,
+          XClient.Favorites,
+          XClient.DirectMessages,
+          XClient.Lists,
+          XClient.Search,
+          XClient.Account,
+          XClient.Trends,
+          XClient.Geo,
+          XClient.Help,
+          XClient.API
+        ],
+        Internals: [
+          XClient.Auth,
+          XClient.HTTP,
+          XClient.Config,
+          XClient.RateLimiter,
+          XClient.Error,
+          XClient.Client
+        ]
+      ]
+    ]
+  end
+
+  defp aliases do
+    [
+      check: [
+        "format --check-formatted",
+        "credo --strict",
+        "dialyzer"
+      ],
+      "test.ci": [
+        "test --cover --warnings-as-errors"
+      ],
+      # Quality checks
+      quality: [
+        "format --check-formatted",
+        "credo --strict",
+        "dialyzer"
+      ]
     ]
   end
 end
