@@ -52,7 +52,7 @@ defmodule XClient.MixProject do
 
       # ── Static analysis ───────────────────────────────────
       {:credo, "~> 1.7", only: [:dev, :test], runtime: false},
-      {:dialyxir, "~> 1.4", only: [:dev], runtime: false},
+      {:dialyxir, "~> 1.4", only: [:dev, :test], runtime: false},
 
       # ── Testing ───────────────────────────────────────────
       {:mox, "~> 1.2", only: :test},
