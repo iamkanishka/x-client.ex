@@ -1,6 +1,6 @@
 # API Reference
 
-Complete reference for all public functions in `XClient` v1.1.0.
+Complete reference for all public functions in `XClient` v1.1.1.
 
 > **Type conventions used throughout this document**
 >
